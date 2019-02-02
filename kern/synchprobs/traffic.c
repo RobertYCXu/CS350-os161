@@ -15,7 +15,7 @@
 
 
 /*
- * 
+ *
  * Includes
  *
  */
@@ -51,7 +51,7 @@ static int ServiceTime = 1;    // time in the intersection
 static int DirectionBias = 0;  // 0 = unbiased, 1 = biased
 
 /*
- * Once the main driver function has created the 
+ * Once the main driver function has created the
  * simulation threads, it uses this semaphore to block until all of the
  * simulation threads are finished.
  */
@@ -60,8 +60,8 @@ static struct semaphore *SimulationWait;
 /*
  *
  * shared simulation state
- * 
- * note: this is state should be used only by the 
+ *
+ * note: this is state should be used only by the
  *  functions in this file, hence the static declarations
  *
  */
@@ -109,9 +109,9 @@ static bool right_turn(Vehicle *v);
 static void check_constraints(int thread_num);
 
 
-/* 
+/*
  * print_direction()
- * 
+ *
  * Purpose:
  *   print a direction
  *
@@ -124,25 +124,25 @@ static void check_constraints(int thread_num);
 static void
 print_direction(Direction d) {
   switch (d)
-    {
-    case north:
-      kprintf("N");
-      break;
-    case east:
-      kprintf("E");
-      break;
-    case south:
-      kprintf("S");
-      break;
-    case west:
-      kprintf("W");
-      break;
-    }
-}    
+  {
+  case north:
+    kprintf("N");
+    break;
+  case east:
+    kprintf("E");
+    break;
+  case south:
+    kprintf("S");
+    break;
+  case west:
+    kprintf("W");
+    break;
+  }
+}
 
-/* 
+/*
  * choose_direction()
- * 
+ *
  * Purpose:
  *   randomly choose a direction, with or without bias
  *
@@ -171,18 +171,18 @@ choose_direction(void) {
   else {
     return random()%4;
   }
-}    
+}
 
 
-/* 
+/*
  * print_perf_stats()
- * 
+ *
  * Purpose:
  *   print the performance statistics
- * 
- * Arguments: 
+ *
+ * Arguments:
  *   none
- * 
+ *
  * Returns:
  *   nothing
  */
@@ -237,12 +237,12 @@ print_perf_stats(void) {
 	  sim_msec/1000,
 	  sim_msec%1000,
 	  total_count);
-} 
+}
 
 
 /*
  * bool right_turn()
- * 
+ *
  * Purpose:
  *   predicate that checks whether a vehicle is making a right turn
  *
@@ -271,14 +271,14 @@ right_turn(Vehicle *v) {
 
 /*
  * check_constraints()
- * 
+ *
  * Purpose:
  *   checks whether the entry of a vehicle into the intersection violates
  *   any synchronization constraints.   Causes a kernel panic if so, otherwise
  *   returns silently
  *
  * Arguments:
- *   number of the simulation thread that moved the vehicle into the intersection 
+ *   number of the simulation thread that moved the vehicle into the intersection
  *
  * Returns:
  *   nothing
@@ -296,7 +296,7 @@ check_constraints(int thread_num) {
     /* no conflict if vehicles go in opposite directions */
     if ((vehicles[i]->origin == vehicles[thread_num]->destination) &&
         (vehicles[i]->destination == vehicles[thread_num]->origin)) continue;
-    /* no conflict if one makes a right turn and 
+    /* no conflict if one makes a right turn and
        the other has a different destination */
     if ((right_turn(vehicles[i]) || right_turn(vehicles[thread_num])) &&
 	(vehicles[thread_num]->destination != vehicles[i]->destination)) continue;
@@ -319,9 +319,9 @@ check_constraints(int thread_num) {
 
 /*
  * initialize_state()
- * 
+ *
  * Purpose:
- *   initializes simulation 
+ *   initializes simulation
  *
  * Arguments:
  *   none
@@ -334,7 +334,7 @@ static void
 initialize_state(void)
 {
   int i;
-  for(i=0;i<MAX_THREADS;i++) {    
+  for(i=0;i<MAX_THREADS;i++) {
     vehicles[i] = (Vehicle * volatile)NULL;
   }
   for(i=0;i<4;i++) {
@@ -362,7 +362,7 @@ initialize_state(void)
 
 /*
  * cleanup_state()
- * 
+ *
  * Purpose:
  *   Releases simulation resources
  *
@@ -387,7 +387,7 @@ cleanup_state(void)
  *
  *  simulate time spent passing through the intersection
  *
- * Arguments: 
+ * Arguments:
  *    none
  *
  * Return:
@@ -420,7 +420,7 @@ in_intersection(void) {
 
 static
 void
-vehicle_simulation(void * unusedpointer, 
+vehicle_simulation(void * unusedpointer,
                unsigned long thread_num)
 {
   int i;
@@ -445,7 +445,7 @@ vehicle_simulation(void * unusedpointer,
     if (random()%NumThreads  < thread_num) {
       thread_yield();
     }
-    
+
     /* choose where this vehicle is coming from */
     v.origin = choose_direction();
     /* choose where this vehicle is heading */
@@ -468,7 +468,7 @@ vehicle_simulation(void * unusedpointer,
     /* enter the intersection */
     /* note: we are setting a global pointer to point to a local
        structure (v) here.   In general, this is dangerous.
-       However, we will be unsetting the 
+       However, we will be unsetting the
        pointer before the local structure goes out of scope */
     P(mutex);
     KASSERT(vehicles[thread_num] == NULL);
@@ -514,7 +514,7 @@ vehicle_simulation(void * unusedpointer,
   }
 
   /* indicate that this simulation is finished */
-  V(SimulationWait); 
+  V(SimulationWait);
 }
 
 
@@ -576,7 +576,7 @@ traffic_simulation(int nargs,
       return EINVAL;
     }
   }
-  
+
   kprintf("Threads: %d Iterations: %d Interarrival time: %d  Service time: %d  Bias?: %s\n",
           NumThreads,NumIterations,InterArrivalTime,ServiceTime,DirectionBias?"yes":"no");
 
@@ -592,8 +592,8 @@ traffic_simulation(int nargs,
       panic("traffic_simulation: thread_fork failed: %s\n", strerror(error));
     }
   }
-  
-  /* wait for all of the vehicle simulations to finish before terminating */  
+
+  /* wait for all of the vehicle simulations to finish before terminating */
   for(i=0;i<NumThreads;i++) {
     P(SimulationWait);
   }
