@@ -30,6 +30,7 @@ static struct cv *W;
 
 static int interState[4];
 static int waitTimes[4];
+static int curDir = -1;
 
 /*
  * The simulation driver will call this function once before starting
@@ -107,38 +108,42 @@ intersection_before_entry(Direction origin, Direction destination)
   /* KASSERT(intersectionSem != NULL); */
   /* P(intersectionSem); */
   (void)destination;
-  KASSERT(curInInter != NULL);
+  /* KASSERT(curInInter != NULL); */
   lock_acquire(curInInter);
     if (origin == north) {
-        while(interState[1] != 0 || interState[2] != 0 || interState[3] != 0) {
+        if((curDir != 0 && curDir != -1) || interState[1] != 0 || interState[2] != 0 || interState[3] != 0) {
           waitTimes[0]++;
           cv_wait(N, curInInter);
         }
+        if (curDir == -1) curDir = 0;
         waitTimes[0] = 0;
         interState[0]++;
 
     }
     else if (origin == south) {
-        while(interState[0] != 0 || interState[2] != 0 || interState[3] != 0) {
+        if((curDir != 1 && curDir != -1) || interState[0] != 0 || interState[2] != 0 || interState[3] != 0) {
           waitTimes[1]++;
           cv_wait(S, curInInter);
         }
+        if (curDir == -1) curDir = 1;
         waitTimes[1] = 0;
         interState[1]++;
     }
     else if (origin == east) {
-        while(interState[0] != 0 || interState[1] != 0 || interState[3] != 0) {
+        if((curDir != 2 && curDir != -1) || interState[0] != 0 || interState[1] != 0 || interState[3] != 0) {
           waitTimes[2]++;
           cv_wait(E, curInInter);
         }
+        if (curDir == -1) curDir = 2;
         waitTimes[2] = 0;
         interState[2]++;
     }
     else if (origin == west) {
-        while(interState[0] != 0 || interState[1] != 0 || interState[2] != 0) {
+        if((curDir != 3 && curDir != -1) || interState[0] != 0 || interState[1] != 0 || interState[2] != 0) {
           waitTimes[3]++;
           cv_wait(W, curInInter);
         }
+        if (curDir == -1) curDir = 3;
         waitTimes[3] = 0;
         interState[3]++;
     }
@@ -165,73 +170,90 @@ intersection_after_exit(Direction origin, Direction destination)
   /* (void)destination; /1* avoid compiler complaint about unused parameter *1/ */
   /* KASSERT(intersectionSem != NULL); */
   /* V(intersectionSem); */
-  KASSERT(curInInter != NULL);
+  /* KASSERT(curInInter != NULL); */
   (void)destination;
   lock_acquire(curInInter);
     if (origin == north) {
-      KASSERT(interState[0] > 0);
+      /* KASSERT(interState[0] > 0); */
       interState[0]--;
-      if (interState[0] == 0) {
-        if (waitTimes[1] >= waitTimes[2] && waitTimes[1] >= waitTimes[3]) {
-          cv_broadcast(S, curInInter);
-        }
-        else if (waitTimes[2] >= waitTimes[1] && waitTimes[2] >= waitTimes[3]) {
-          cv_broadcast(E, curInInter);
-        }
-        else {
-          cv_broadcast(W, curInInter);
-        }
-      }
     }
     else if (origin == south) {
-      KASSERT(interState[1] > 0);
+      /* KASSERT(interState[1] > 0); */
       interState[1]--;
-      if (interState[1] == 0) {
-        if (waitTimes[2] >= waitTimes[3] && waitTimes[2] >= waitTimes[0]) {
-          cv_broadcast(E, curInInter);
-        }
-        else if (waitTimes[0] >= waitTimes[2] && waitTimes[0] >= waitTimes[3]) {
-          cv_broadcast(N, curInInter);
-        }
-        else {
-          cv_broadcast(W, curInInter);
-        }
-      }
     }
     else if (origin == east) {
-      KASSERT(interState[2] > 0);
+      /* KASSERT(interState[2] > 0); */
       interState[2]--;
-      if (interState[2] == 0) {
-        if (waitTimes[3] >= waitTimes[0] && waitTimes[3] >= waitTimes[1]) {
-          cv_broadcast(W, curInInter);
-        }
-        else if (waitTimes[0] >= waitTimes[3] && waitTimes[0] >= waitTimes[1]) {
-          cv_broadcast(N, curInInter);
-        }
-        else {
-          cv_broadcast(S, curInInter);
-        }
-      }
     }
     else {
-      KASSERT(interState[3] > 0);
+      /* KASSERT(interState[3] > 0); */
       interState[3]--;
-      if (interState[3] == 0) {
-        if (waitTimes[0] >= waitTimes[1] && waitTimes[0] >= waitTimes[2]) {
-          cv_broadcast(N, curInInter);
-        }
-        else if (waitTimes[2] >= waitTimes[0] && waitTimes[2] >= waitTimes[1]) {
-          cv_broadcast(E, curInInter);
-        }
-
-        else {
-          cv_broadcast(S, curInInter);
-        }
-      }
     }
-    /* cv_broadcast(N, curInInter); */
-    /* cv_broadcast(S, curInInter); */
-    /* cv_broadcast(E, curInInter); */
-    /* cv_broadcast(W, curInInter); */
+    /* if (waitTimes[0] == 0 && waitTimes[1] == 0 && waitTimes[2] == 0 && waitTimes[3] == 0) {} */
+    if (interState[0] == 0 && interState[1] == 0 && interState[2] == 0 && interState[3] == 0) {
+      if (waitTimes[0] == 0 && waitTimes[1] == 0 && waitTimes[2] == 0 && waitTimes[3] == 0) {
+        curDir = -1;
+        lock_release(curInInter);
+        return;
+      }
+      switch (origin) {
+        case north:
+          if (waitTimes[1] > 0) {
+            curDir = 1;
+            cv_broadcast(S, curInInter);
+          }
+          else if (waitTimes[2] > 0) {
+            curDir = 2;
+            cv_broadcast(E, curInInter);
+          }
+          else {
+            curDir = 3;
+            cv_broadcast(W, curInInter);
+          }
+          break;
+        case south:
+          if (waitTimes[2] > 0) {
+            curDir = 2;
+            cv_broadcast(E, curInInter);
+          }
+          else if (waitTimes[3] > 0) {
+            curDir = 3;
+            cv_broadcast(W, curInInter);
+          }
+          else {
+            curDir = 0;
+            cv_broadcast(N, curInInter);
+          }
+          break;
+        case east:
+          if (waitTimes[3] > 0) {
+            curDir = 3;
+            cv_broadcast(W, curInInter);
+          }
+          else if (waitTimes[0] > 0) {
+            curDir = 0;
+            cv_broadcast(N, curInInter);
+          }
+          else {
+            curDir = 1;
+            cv_broadcast(S, curInInter);
+          }
+          break;
+        case west:
+          if (waitTimes[0] > 0) {
+            curDir = 0;
+            cv_broadcast(N, curInInter);
+          }
+          else if (waitTimes[1] > 0) {
+            curDir = 1;
+            cv_broadcast(S, curInInter);
+          }
+          else {
+            curDir = 2;
+            cv_broadcast(E, curInInter);
+          }
+          break;
+        }
+    }
   lock_release(curInInter);
 }
