@@ -49,7 +49,8 @@
 #include <vnode.h>
 #include <vfs.h>
 #include <synch.h>
-#include <kern/fcntl.h>  
+#include <kern/fcntl.h>
+#include "opt-A2.h"
 
 /*
  * The process for the kernel; this holds all the kernel-only threads.
@@ -63,10 +64,17 @@ struct proc *kproc;
 /* count of the number of processes, excluding kproc */
 static volatile unsigned int proc_count;
 /* provides mutual exclusion for proc_count */
-/* it would be better to use a lock here, but we use a semaphore because locks are not implemented in the base kernel */ 
+/* it would be better to use a lock here, but we use a semaphore because locks are not implemented in the base kernel */
 static struct semaphore *proc_count_mutex;
 /* used to signal the kernel menu thread when there are no processes */
-struct semaphore *no_proc_sem;   
+struct semaphore *no_proc_sem;
+
+#if OPT_A2
+static struct lock *cur_pid_lock;
+static volatile pid_t cur_pid;
+static bool kernel_initialized;
+#endif
+
 #endif  // UW
 
 
@@ -78,6 +86,9 @@ static
 struct proc *
 proc_create(const char *name)
 {
+#if OPT_A2
+  KASSERT(cur_pid > 0);
+#endif
 	struct proc *proc;
 
 	proc = kmalloc(sizeof(*proc));
@@ -98,6 +109,23 @@ proc_create(const char *name)
 
 	/* VFS fields */
 	proc->p_cwd = NULL;
+
+#if OPT_A2
+  if (kernel_initialized) {
+    lock_acquire(cur_pid_lock);
+      proc->pid = cur_pid;
+      cur_pid++;
+    lock_release(cur_pid_lock);
+  }
+  else {
+    proc->pid = cur_pid;
+    cur_pid++;
+  }
+  proc->children_info = array_create();
+  proc->is_dying = cv_create("is_dying");
+  proc->child_lock = lock_create("child_lock");
+  proc->parent = NULL;
+#endif
 
 #ifdef UW
 	proc->console = NULL;
@@ -123,6 +151,7 @@ proc_destroy(struct proc *proc)
 
 	KASSERT(proc != NULL);
 	KASSERT(proc != kproc);
+  if (proc->tf != NULL) kfree(proc->tf);
 
 	/*
 	 * We don't take p_lock in here because we must have the only
@@ -136,6 +165,21 @@ proc_destroy(struct proc *proc)
 		proc->p_cwd = NULL;
 	}
 
+#if OPT_A2
+  // destroy children_info array
+  lock_acquire(proc->child_lock);
+    for (int i = array_num(proc->children_info) - 1; i >= 0; i--) {
+      struct proc_info *pinfo = (struct proc_info *)array_get(proc->children_info, i);
+      pinfo->proc_addr->parent = NULL;
+      kfree(pinfo);
+      array_remove(proc->children_info, i);
+    }
+    array_destroy(proc->children_info);
+  lock_release(proc->child_lock);
+  // destroy is_dying cv and lock on children array
+  cv_destroy(proc->is_dying);
+  lock_destroy(proc->child_lock);
+#endif
 
 #ifndef UW  // in the UW version, space destruction occurs in sys_exit, not here
 	if (proc->p_addrspace) {
@@ -174,7 +218,7 @@ proc_destroy(struct proc *proc)
         /* note: kproc is not included in the process count, but proc_destroy
 	   is never called on kproc (see KASSERT above), so we're OK to decrement
 	   the proc_count unconditionally here */
-	P(proc_count_mutex); 
+	P(proc_count_mutex);
 	KASSERT(proc_count > 0);
 	proc_count--;
 	/* signal the kernel menu thread if the process count has reached zero */
@@ -183,7 +227,8 @@ proc_destroy(struct proc *proc)
 	}
 	V(proc_count_mutex);
 #endif // UW
-	
+
+
 
 }
 
@@ -193,10 +238,19 @@ proc_destroy(struct proc *proc)
 void
 proc_bootstrap(void)
 {
+#if OPT_A2
+  kernel_initialized = false;
+  cur_pid = 1;
+  cur_pid_lock = lock_create("cur_pid_lock");
+  if (cur_pid_lock == NULL) {
+    panic("could not create cur_pid_lock lock\n");
+  }
+#endif
   kproc = proc_create("[kernel]");
   if (kproc == NULL) {
     panic("proc_create for kproc failed\n");
   }
+  kernel_initialized = true;
 #ifdef UW
   proc_count = 0;
   proc_count_mutex = sem_create("proc_count_mutex",1);
@@ -207,7 +261,7 @@ proc_bootstrap(void)
   if (no_proc_sem == NULL) {
     panic("could not create no_proc_sem semaphore\n");
   }
-#endif // UW 
+#endif // UW
 }
 
 /*
@@ -238,7 +292,7 @@ proc_create_runprogram(const char *name)
 	}
 	kfree(console_path);
 #endif // UW
-	  
+
 	/* VM fields */
 
 	proc->p_addrspace = NULL;
@@ -266,7 +320,7 @@ proc_create_runprogram(const char *name)
 	/* increment the count of processes */
         /* we are assuming that all procs, including those created by fork(),
            are created using a call to proc_create_runprogram  */
-	P(proc_count_mutex); 
+	P(proc_count_mutex);
 	proc_count++;
 	V(proc_count_mutex);
 #endif // UW
@@ -334,7 +388,7 @@ curproc_getas(void)
 {
 	struct addrspace *as;
 #ifdef UW
-        /* Until user processes are created, threads used in testing 
+        /* Until user processes are created, threads used in testing
          * (i.e., kernel threads) have no process or address space.
          */
 	if (curproc == NULL) {
@@ -363,4 +417,16 @@ curproc_setas(struct addrspace *newas)
 	proc->p_addrspace = newas;
 	spinlock_release(&proc->p_lock);
 	return oldas;
+}
+
+struct addrspace *
+proc_setas(struct addrspace *newas, struct proc *proc)
+{
+  struct addrspace *oldas;
+  spinlock_acquire(&proc->p_lock);
+    oldas = proc->p_addrspace;
+    proc->p_addrspace = newas;
+  spinlock_release(&proc->p_lock);
+
+  return oldas;
 }
