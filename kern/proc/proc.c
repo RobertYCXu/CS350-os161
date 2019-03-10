@@ -109,6 +109,7 @@ proc_create(const char *name)
 
 	/* VFS fields */
 	proc->p_cwd = NULL;
+  proc->tf = NULL;
 
 #if OPT_A2
   if (kernel_initialized) {
@@ -151,7 +152,10 @@ proc_destroy(struct proc *proc)
 
 	KASSERT(proc != NULL);
 	KASSERT(proc != kproc);
-  if (proc->tf != NULL) kfree(proc->tf);
+
+  /****************************** MEM LEAK HERE FIX THIS *******************************/
+  /* if (proc->tf != NULL) kfree(proc->tf); */
+  /****************************** MEM LEAK HERE FIX THIS *******************************/
 
 	/*
 	 * We don't take p_lock in here because we must have the only

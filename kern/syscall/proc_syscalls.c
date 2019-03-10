@@ -11,6 +11,8 @@
 #include <copyinout.h>
 #if OPT_A2
 #include <mips/trapframe.h>
+#include <vfs.h>
+#include <kern/fcntl.h>
 #endif
 #include "opt-A2.h"
 
@@ -163,16 +165,87 @@ sys_fork(struct trapframe *tf, pid_t *retval)
   /* proc_setas(child->p_addrspace, child); */
 
   // create temp trapframe
-  child->tf = kmalloc(sizeof(struct trapframe));
-  KASSERT(child->tf != NULL);
-  memcpy(child->tf, tf, sizeof(struct trapframe));
-  curproc->tf = child->tf;
+  curproc->tf = kmalloc(sizeof(struct trapframe));
+  KASSERT(curproc->tf != NULL);
+  memcpy(curproc->tf, tf, sizeof(struct trapframe));
 
   // fork thread with temp trapframe
-  thread_fork(child->p_name, child, (void *)&enter_forked_process, child->tf, 10);
+  thread_fork(child->p_name, child, (void *)&enter_forked_process, curproc->tf, 10);
 
   *retval =  child->pid;
 
   return(0);
+}
+
+int sys_execv(const char * program_name, char ** args, int * retval)
+{
+	struct addrspace *as;
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;
+	int result;
+  (void)args;
+  (void)retval;
+
+  // copy over program name into kernel space
+  size_t program_name_len = (strlen(program_name) + 1) * sizeof(char);
+  char * program_name_kernel = kmalloc(program_name_len);
+  KASSERT(program_name_kernel != NULL);
+  int err = copyin((const_userptr_t) program_name, (void *) program_name_kernel, program_name_len);
+  KASSERT(err == 0);
+  /* kprintf(program_name_kernel); */
+
+
+  // count number of args and copy into kernel
+  // ...
+
+  // copy program path into kernel
+  // ...
+
+	/* Open the file. */
+	result = vfs_open(program_name_kernel, O_RDONLY, 0, &v);
+	if (result) {
+		return result;
+	}
+
+	/* We should be a new process. */
+	/* KASSERT(curproc_getas() == NULL); */
+
+	/* Create a new address space. */
+	as = as_create();
+	if (as ==NULL) {
+		vfs_close(v);
+		return ENOMEM;
+	}
+
+	/* Switch to it and activate it. */
+	curproc_setas(as);
+	as_activate();
+
+	/* Load the executable. */
+	result = load_elf(v, &entrypoint);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+		vfs_close(v);
+		return result;
+	}
+
+	/* Done with the file now. */
+	vfs_close(v);
+
+	/* Define the user stack in the address space */
+	result = as_define_stack(as, &stackptr);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+		return result;
+	}
+
+	/* Warp to user mode. */
+	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
+			  stackptr, entrypoint);
+
+	/* enter_new_process does not return. */
+	panic("enter_new_process returned\n");
+  return EINVAL;
+
 }
 
