@@ -177,29 +177,46 @@ sys_fork(struct trapframe *tf, pid_t *retval)
   return(0);
 }
 
-int sys_execv(const char * program_name, char ** args, int * retval)
+int sys_execv(const char * program_name, char ** args)
 {
 	struct addrspace *as;
 	struct vnode *v;
 	vaddr_t entrypoint, stackptr;
 	int result;
   (void)args;
-  (void)retval;
 
   // copy over program name into kernel space
-  size_t program_name_len = (strlen(program_name) + 1) * sizeof(char);
-  char * program_name_kernel = kmalloc(program_name_len);
+  size_t program_name_size = (strlen(program_name) + 1) * sizeof(char);
+  char * program_name_kernel = kmalloc(program_name_size);
   KASSERT(program_name_kernel != NULL);
-  int err = copyin((const_userptr_t) program_name, (void *) program_name_kernel, program_name_len);
+  int err = copyin((const_userptr_t) program_name, (void *) program_name_kernel, program_name_size);
   KASSERT(err == 0);
-  /* kprintf(program_name_kernel); */
 
 
   // count number of args and copy into kernel
-  // ...
+  int num_args = 0;
+  for (int i = 0; args[i] != NULL; i++) {
+    num_args++;
+  }
 
-  // copy program path into kernel
-  // ...
+  // copy program args into kernel
+  size_t args_array_size = (num_args + 1) * sizeof(char *);
+  char ** args_kernel = kmalloc(args_array_size);
+  KASSERT(args_kernel != NULL);
+
+  for (int i = 0; i <= num_args; i++) {
+    if (i == num_args) {
+      args_kernel[i] = NULL;
+    }
+    else {
+      size_t arg_size = (strlen(args[i]) + 1) * sizeof(char);
+      args_kernel[i] = kmalloc(arg_size);
+      KASSERT(args_kernel[i] != NULL);
+      int err = copyin((const_userptr_t) args[i], (void *) args_kernel[i], arg_size);
+      KASSERT(err == 0);
+    }
+  }
+
 
 	/* Open the file. */
 	result = vfs_open(program_name_kernel, O_RDONLY, 0, &v);
@@ -218,7 +235,7 @@ int sys_execv(const char * program_name, char ** args, int * retval)
 	}
 
 	/* Switch to it and activate it. */
-	curproc_setas(as);
+	struct addrspace * as_old = curproc_setas(as);
 	as_activate();
 
 	/* Load the executable. */
@@ -239,9 +256,38 @@ int sys_execv(const char * program_name, char ** args, int * retval)
 		return result;
 	}
 
+  //HARD PART: COPY ARGS TO USER STACK
+  vaddr_t temp_stack_ptr = stackptr;
+  vaddr_t *stack_args = kmalloc((num_args + 1) * sizeof(vaddr_t));
+
+  for (int i = num_args; i >= 0; i--) {
+    if (i == num_args) {
+      stack_args[i] = (vaddr_t) NULL;
+      continue;
+    }
+    size_t arg_length = ROUNDUP(strlen(args_kernel[i]) + 1, 4);
+    size_t arg_size = arg_length * sizeof(char);
+    temp_stack_ptr -= arg_size;
+    int err = copyout((void *) args_kernel[i], (userptr_t) temp_stack_ptr, arg_length);
+    KASSERT(err == 0);
+    stack_args[i] = temp_stack_ptr;
+  }
+
+  for (int i = num_args; i >= 0; i--) {
+    size_t str_pointer_size = sizeof(vaddr_t);
+    temp_stack_ptr -= str_pointer_size;
+    int err = copyout((void *) &stack_args[i], (userptr_t) temp_stack_ptr, str_pointer_size);
+    KASSERT(err == 0);
+  }
+  // HARD PART: COPY ARGS TO USER STACK
+
+  as_destroy(as_old);
+  kfree(program_name_kernel);
+  // might want to free args_kernel
+
 	/* Warp to user mode. */
-	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
-			  stackptr, entrypoint);
+	enter_new_process(num_args /*argc*/, (userptr_t) temp_stack_ptr /*userspace addr of argv*/,
+			  ROUNDUP(temp_stack_ptr, 8), entrypoint);
 
 	/* enter_new_process does not return. */
 	panic("enter_new_process returned\n");
