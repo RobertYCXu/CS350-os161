@@ -39,6 +39,9 @@
 #include <vm.h>
 #include <mainbus.h>
 #include <syscall.h>
+#include <addrspace.h>
+#include <proc.h>
+#include "opt-A3.h"
 
 
 /* in exception.S */
@@ -77,44 +80,76 @@ kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 
 	KASSERT(code < NTRAPCODES);
 	switch (code) {
-	    case EX_IRQ:
-	    case EX_IBE:
-	    case EX_DBE:
-	    case EX_SYS:
+	  case EX_IRQ:
+    case EX_IBE:
+    case EX_DBE:
+    case EX_SYS:
 		/* should not be seen */
-		KASSERT(0);
-		sig = SIGABRT;
-		break;
-	    case EX_MOD:
-	    case EX_TLBL:
-	    case EX_TLBS:
-		sig = SIGSEGV;
-		break;
-	    case EX_ADEL:
-	    case EX_ADES:
-		sig = SIGBUS;
-		break;
-	    case EX_BP:
-		sig = SIGTRAP;
-		break;
-	    case EX_RI:
-		sig = SIGILL;
-		break;
-	    case EX_CPU:
-		sig = SIGSEGV;
-		break;
-	    case EX_OVF:
-		sig = SIGFPE;
-		break;
+      KASSERT(0);
+      sig = SIGABRT;
+      break;
+    case EX_MOD:
+    case EX_TLBL:
+    case EX_TLBS:
+      sig = SIGSEGV;
+      break;
+    case EX_ADEL:
+    case EX_ADES:
+      sig = SIGBUS;
+      break;
+    case EX_BP:
+      sig = SIGTRAP;
+      break;
+    case EX_RI:
+      sig = SIGILL;
+      break;
+    case EX_CPU:
+      sig = SIGSEGV;
+      break;
+    case EX_OVF:
+      sig = SIGFPE;
+      break;
 	}
 
 	/*
 	 * You will probably want to change this.
 	 */
+#if OPT_A3
+  struct addrspace *as;
+  struct proc *p = curproc;
+  KASSERT(curproc->p_addrspace != NULL);
+  as_deactivate();
+  /*
+   * clear p_addrspace before calling as_destroy. Otherwise if
+   * as_destroy sleeps (which is quite possible) when we
+   * come back we'll be calling as_activate on a
+   * half-destroyed address space. This tends to be
+   * messily fatal.
+   */
+  as = curproc_setas(NULL);
+  as_destroy(as);
+
+  /* detach this thread from its process */
+  /* note: curproc cannot be used after this call */
+  proc_remthread(curthread);
+
+  /* if this is the last user process in the system, proc_destroy()
+     will wake up the kernel menu thread */
+  proc_destroy(p);
+
+  thread_exit();
+  /* thread_exit() does not return, so we should never get here */
+  panic("return from thread_exit in sys_exit\n");
 
 	kprintf("Fatal user mode trap %u sig %d (%s, epc 0x%x, vaddr 0x%x)\n",
 		code, sig, trapcodenames[code], epc, vaddr);
 	panic("I don't know how to handle this\n");
+
+#else
+	kprintf("Fatal user mode trap %u sig %d (%s, epc 0x%x, vaddr 0x%x)\n",
+		code, sig, trapcodenames[code], epc, vaddr);
+	panic("I don't know how to handle this\n");
+#endif
 }
 
 /*
@@ -217,7 +252,7 @@ mips_trap(struct trapframe *tf)
 		KASSERT(curthread->t_curspl == 0);
 		KASSERT(curthread->t_iplhigh_count == 0);
 
-		DEBUG(DB_SYSCALL, "syscall: #%d, args %x %x %x %x\n", 
+		DEBUG(DB_SYSCALL, "syscall: #%d, args %x %x %x %x\n",
 		      tf->tf_v0, tf->tf_a0, tf->tf_a1, tf->tf_a2, tf->tf_a3);
 
 		syscall(tf);
@@ -248,11 +283,11 @@ mips_trap(struct trapframe *tf)
 	case EX_IBE:
 	case EX_DBE:
 		/*
-		 * This means you loaded invalid TLB entries, or 
-		 * touched invalid parts of the direct-mapped 
+		 * This means you loaded invalid TLB entries, or
+		 * touched invalid parts of the direct-mapped
 		 * segments. These are serious kernel errors, so
 		 * panic.
-		 * 
+		 *
 		 * The MIPS won't even tell you what invalid address
 		 * caused the bus error.
 		 */
@@ -282,8 +317,8 @@ mips_trap(struct trapframe *tf)
 	 * set by copyin/copyout and related functions to signify that
 	 * the addresses they're accessing are userlevel-supplied and
 	 * not trustable. What we actually want to do is resume
-	 * execution at the function pointed to by badfaultfunc. That's 
-	 * going to be "copyfail" (see copyinout.c), which longjmps 
+	 * execution at the function pointed to by badfaultfunc. That's
+	 * going to be "copyfail" (see copyinout.c), which longjmps
 	 * back to copyin/copyout or wherever and returns EFAULT.
 	 *
 	 * Note that we do not just *call* this function, because that
@@ -308,7 +343,7 @@ mips_trap(struct trapframe *tf)
 
 	kprintf("panic: Fatal exception %u (%s) in kernel mode\n", code,
 		trapcodenames[code]);
-	kprintf("panic: EPC 0x%x, exception vaddr 0x%x\n", 
+	kprintf("panic: EPC 0x%x, exception vaddr 0x%x\n",
 		tf->tf_epc, tf->tf_vaddr);
 
 	panic("I can't handle this... I think I'll just die now...\n");

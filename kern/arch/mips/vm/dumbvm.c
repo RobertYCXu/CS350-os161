@@ -120,14 +120,18 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	DEBUG(DB_VM, "dumbvm: fault: 0x%x\n", faultaddress);
 
 	switch (faulttype) {
-	    case VM_FAULT_READONLY:
+    case VM_FAULT_READONLY:
+#if OPT_A3
+      return EFAULT;
 		/* We always create pages read-write, so we can't get this */
-		panic("dumbvm: got VM_FAULT_READONLY\n");
-	    case VM_FAULT_READ:
-	    case VM_FAULT_WRITE:
-		break;
-	    default:
-		return EINVAL;
+#else
+      panic("dumbvm: got VM_FAULT_READONLY\n");
+#endif
+    case VM_FAULT_READ:
+    case VM_FAULT_WRITE:
+      break;
+    default:
+      return EINVAL;
 	}
 
 	if (curproc == NULL) {
@@ -169,8 +173,14 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	stackbase = USERSTACK - DUMBVM_STACKPAGES * PAGE_SIZE;
 	stacktop = USERSTACK;
 
+#if OPT_A3
+  bool code_seg = false;
+  bool loadelf_complete = as->loadelf_complete;
+#endif
+
 	if (faultaddress >= vbase1 && faultaddress < vtop1) {
 		paddr = (faultaddress - vbase1) + as->as_pbase1;
+    code_seg = true;
 	}
 	else if (faultaddress >= vbase2 && faultaddress < vtop2) {
 		paddr = (faultaddress - vbase2) + as->as_pbase2;
@@ -194,7 +204,10 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 			continue;
 		}
 		ehi = faultaddress;
-		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+    elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+  #if OPT_A3
+    if (code_seg && loadelf_complete) elo &= ~TLBLO_DIRTY;
+  #endif
 		DEBUG(DB_VM, "dumbvm: 0x%x -> 0x%x\n", faultaddress, paddr);
 		tlb_write(ehi, elo, i);
 		splx(spl);
@@ -203,6 +216,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 #if OPT_A3
   ehi = faultaddress;
   elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+  if (code_seg && loadelf_complete) elo &= ~TLBLO_DIRTY;
   tlb_random(ehi, elo);
   splx(spl);
   return 0;
@@ -228,6 +242,9 @@ as_create(void)
 	as->as_pbase2 = 0;
 	as->as_npages2 = 0;
 	as->as_stackpbase = 0;
+#if OPT_A3
+  as->loadelf_complete = false;
+#endif
 
 	return as;
 }

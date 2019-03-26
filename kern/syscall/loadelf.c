@@ -59,6 +59,7 @@
 #include <addrspace.h>
 #include <vnode.h>
 #include <elf.h>
+#include "opt-A3.h"
 
 /*
  * Load a segment at virtual address VADDR. The segment in memory
@@ -77,7 +78,7 @@
 static
 int
 load_segment(struct addrspace *as, struct vnode *v,
-	     off_t offset, vaddr_t vaddr, 
+	     off_t offset, vaddr_t vaddr,
 	     size_t memsize, size_t filesize,
 	     int is_executable)
 {
@@ -90,7 +91,7 @@ load_segment(struct addrspace *as, struct vnode *v,
 		filesize = memsize;
 	}
 
-	DEBUG(DB_EXEC, "ELF: Loading %lu bytes to 0x%lx\n", 
+	DEBUG(DB_EXEC, "ELF: Loading %lu bytes to 0x%lx\n",
 	      (unsigned long) filesize, (unsigned long) vaddr);
 
 	iov.iov_ubase = (userptr_t)vaddr;
@@ -134,14 +135,14 @@ load_segment(struct addrspace *as, struct vnode *v,
 
 		fillamt = memsize - filesize;
 		if (fillamt > 0) {
-			DEBUG(DB_EXEC, "ELF: Zero-filling %lu more bytes\n", 
+			DEBUG(DB_EXEC, "ELF: Zero-filling %lu more bytes\n",
 			      (unsigned long) fillamt);
 			u.uio_resid += fillamt;
 			result = uiomovezeros(fillamt, &u);
 		}
 	}
 #endif
-	
+
 	return result;
 }
 
@@ -210,7 +211,7 @@ load_elf(struct vnode *v, vaddr_t *entrypoint)
 	 * conceivably be more. You don't need to support such files
 	 * if it's unduly awkward to do so.
 	 *
-	 * Note that the expression eh.e_phoff + i*eh.e_phentsize is 
+	 * Note that the expression eh.e_phoff + i*eh.e_phentsize is
 	 * mandated by the ELF standard - we use sizeof(ph) to load,
 	 * because that's the structure we know, but the file on disk
 	 * might have a larger structure, so we must use e_phentsize
@@ -238,7 +239,7 @@ load_elf(struct vnode *v, vaddr_t *entrypoint)
 		    case PT_MIPS_REGINFO: /* skip */ continue;
 		    case PT_LOAD: break;
 		    default:
-			kprintf("loadelf: unknown segment type %d\n", 
+			kprintf("loadelf: unknown segment type %d\n",
 				ph.p_type);
 			return ENOEXEC;
 		}
@@ -283,12 +284,12 @@ load_elf(struct vnode *v, vaddr_t *entrypoint)
 		    case PT_MIPS_REGINFO: /* skip */ continue;
 		    case PT_LOAD: break;
 		    default:
-			kprintf("loadelf: unknown segment type %d\n", 
+			kprintf("loadelf: unknown segment type %d\n",
 				ph.p_type);
 			return ENOEXEC;
 		}
 
-		result = load_segment(as, v, ph.p_offset, ph.p_vaddr, 
+		result = load_segment(as, v, ph.p_offset, ph.p_vaddr,
 				      ph.p_memsz, ph.p_filesz,
 				      ph.p_flags & PF_X);
 		if (result) {
@@ -302,6 +303,10 @@ load_elf(struct vnode *v, vaddr_t *entrypoint)
 	}
 
 	*entrypoint = eh.e_entry;
+#if OPT_A3
+  as->loadelf_complete = true;
+  as_activate();
+#endif
 
 	return 0;
 }
