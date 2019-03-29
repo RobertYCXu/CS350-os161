@@ -284,6 +284,10 @@ int sys_execv(const char * program_name, char ** args)
   as_destroy(as_old);
   kfree(program_name_kernel);
   // might want to free args_kernel
+  for (int i = 0; i <= num_args; i++) {
+    kfree(args_kernel[i]);
+  }
+  kfree(args_kernel);
 
 	/* Warp to user mode. */
 	enter_new_process(num_args /*argc*/, (userptr_t) temp_stack_ptr /*userspace addr of argv*/,
